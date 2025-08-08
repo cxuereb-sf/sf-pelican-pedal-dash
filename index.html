@@ -2,478 +2,172 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Pelican Pedal Dash — Prototype</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pelican Pedal Dash — First Person</title>
 <style>
-  :root{
-    --bg:#f6e7d6;
-    --panel:#fff7ee;
-    --accent:#fa7b2d;
-    --dark:#1f2b2e;
-    font-family: "Segoe UI", Roboto, system-ui, -apple-system, "Helvetica Neue", Arial;
-  }
-  html,body{height:100%;margin:0;background:linear-gradient(#f6e7d6,#f0dcc6);-webkit-tap-highlight-color:transparent;}
-  .wrap{display:flex;flex-direction:column;height:100%;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
-  canvas{border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.15);background:transparent;display:block;}
-  .hud{position:fixed;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;align-items:center;pointer-events:none;}
-  .panel{background:var(--panel);padding:8px 12px;border-radius:10px;font-weight:600;pointer-events:auto;box-shadow:0 3px 8px rgba(0,0,0,0.08);}
-  .controls{position:fixed;left:0;right:0;bottom:12px;display:flex;justify-content:center;gap:10px;pointer-events:none;}
-  .btn{background:rgba(255,255,255,0.95);border-radius:12px;padding:12px;min-width:64px;text-align:center;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,0.12);pointer-events:auto;user-select:none;}
-  .btn.small{padding:8px 10px;min-width:50px}
-  .virtual-controls{display:flex;gap:10px;align-items:center;pointer-events:auto;}
-  .vbtn{background:linear-gradient(#fff,#fff7);border-radius:50%;width:70px;height:70px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;box-shadow:0 6px 12px rgba(0,0,0,0.12);user-select:none;touch-action:manipulation;}
-  .vbtn:active{transform:scale(.98)}
-  .center-col{display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:auto;}
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(rgba(10,10,10,0.2),rgba(10,10,10,0.1));backdrop-filter: blur(2px);z-index:80}
-  .menu{background:var(--panel);padding:18px;border-radius:14px;min-width:260px;max-width:94vw;box-shadow:0 10px 30px rgba(0,0,0,0.18);text-align:center;}
-  .title{font-size:20px;font-weight:900;color:var(--dark);margin-bottom:8px}
-  .muted{font-size:13px;color:#666;margin-bottom:12px}
-  .big{font-size:28px;font-weight:900;color:var(--accent)}
-  .hint{font-size:12px;color:#444;margin-top:6px}
-  .footer-note{font-size:12px;color:#666;margin-top:12px}
-  @media (max-width:520px){
-    .vbtn{width:60px;height:60px;font-size:18px}
-  }
+  html, body {margin:0; background:#87CEEB; overflow:hidden; touch-action:none;}
+  canvas {display:block;}
 </style>
 </head>
 <body>
-<div class="hud">
-  <div class="panel" id="scorePanel">Score: 0</div>
-  <div class="panel" id="speedPanel">Speed: 1</div>
-</div>
-
-<div class="wrap">
-  <canvas id="game" style="width:100%;max-width:900px;height:70vmin;max-height:1200px;"></canvas>
-</div>
-
-<div class="controls">
-  <div class="virtual-controls">
-    <div class="vbtn" id="leftBtn">◀</div>
-    <div class="center-col">
-      <div class="vbtn" id="upBtn">▲</div>
-      <div class="vbtn" id="downBtn">▼</div>
-    </div>
-    <div class="vbtn" id="rightBtn">▶</div>
-  </div>
-</div>
-
-<!-- Start / Game Over overlay -->
-<div id="overlay" class="overlay">
-  <div class="menu">
-    <div class="title">Pelican Pedal Dash</div>
-    <div class="muted">Ride a pelican-bicycle through stylized San Francisco. Avoid traffic. Fun & easy!</div>
-    <div style="margin:10px 0">
-      <div class="big" id="bestScore">Best: 0</div>
-    </div>
-    <button class="btn" id="startBtn">Start</button>
-    <div class="hint">Controls: Arrow keys or on-screen buttons. Tap to steer on mobile.</div>
-    <div class="footer-note">Prototype — lightweight HTML5 canvas</div>
-  </div>
-</div>
-
+<canvas id="game"></canvas>
 <script>
-/* ----- Basic responsive canvas setup ----- */
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-let DPR = Math.max(1, window.devicePixelRatio || 1);
-function resizeCanvas(){
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.floor(rect.width * DPR);
-  canvas.height = Math.floor(rect.height * DPR);
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-}
-new ResizeObserver(resizeCanvas).observe(canvas);
-resizeCanvas();
+let W = window.innerWidth, H = window.innerHeight;
+canvas.width = W; canvas.height = H;
 
-/* ----- Game state ----- */
-let state = 'menu'; // menu, playing, gameover
-let score = 0, best = localStorage.getItem('ppd_best')||0;
-document.getElementById('bestScore').innerText = 'Best: ' + best;
-const scorePanel = document.getElementById('scorePanel');
-const speedPanel = document.getElementById('speedPanel');
-
-const lanes = [0.22, 0.42, 0.62, 0.82]; // relative y positions (fraction)
-const laneCount = lanes.length;
-
-/* ----- Player (pelican on bike) ----- */
-const player = {
-  x: 120,
-  lane: 1, // index in lanes
-  width: 72,
-  height: 64,
-  vy: 0,
-  targetY: 0,
-  wobble:0
-};
-
-/* ----- Obstacles (cars) ----- */
-let obstacles = [];
-let spawnTimer = 0;
-let spawnInterval = 1000; // ms
-let gameSpeed = 1; // increases over time
-
-/* ----- Input handling ----- */
-const keys = {};
-window.addEventListener('keydown', (e)=>{ keys[e.key]=true; e.preventDefault && e.preventDefault(); });
-window.addEventListener('keyup', (e)=>{ keys[e.key]=false; });
-
-function moveUp(){ player.lane = Math.max(0, player.lane-1); playTap(); }
-function moveDown(){ player.lane = Math.min(laneCount-1, player.lane+1); playTap(); }
-
-/* Virtual buttons */
-const upBtn = document.getElementById('upBtn');
-const downBtn = document.getElementById('downBtn');
-const leftBtn = document.getElementById('leftBtn');
-const rightBtn = document.getElementById('rightBtn');
-leftBtn.addEventListener('touchstart', e=>{ e.preventDefault(); /*dash left - small wobble*/ player.x -= 18; player.x = Math.max(40, player.x); playTap();});
-rightBtn.addEventListener('touchstart', e=>{ e.preventDefault(); player.x += 18; player.x = Math.min(canvas.width/ DPR - 80, player.x); playTap();});
-upBtn.addEventListener('touchstart', e=>{ e.preventDefault(); moveUp(); });
-downBtn.addEventListener('touchstart', e=>{ e.preventDefault(); moveDown(); });
-
-/* Mouse / tap to change lane by tapping upper/lower half */
-canvas.addEventListener('touchstart', function(e){
-  const t = e.touches[0];
-  const r = canvas.getBoundingClientRect();
-  const y = (t.clientY - r.top) / r.height;
-  if(y < 0.5) moveUp(); else moveDown();
+window.addEventListener('resize',()=>{
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
 });
 
-/* ----- Simple sounds via webaudio (tiny beeps) ----- */
-const AudioContext = window.AudioContext || window.webkitAudioContext;
-let audioCtx = null;
-function initAudio(){ if(!audioCtx) audioCtx = new AudioContext(); }
-function playTap(){
-  try{
-    initAudio();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'sine';
-    o.frequency.value = 650;
-    g.gain.value = 0.04;
-    o.connect(g); g.connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.06);
-  }catch(e){}
-}
-function playCrash(){
-  try{
-    initAudio();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'square';
-    o.frequency.value = 120;
-    g.gain.value = 0.08;
-    o.connect(g); g.connect(audioCtx.destination);
-    o.start();
-    o.frequency.setValueAtTime(60, audioCtx.currentTime+0.04);
-    o.stop(audioCtx.currentTime + 0.22);
-  }catch(e){}
-}
+// Player state
+let playerX = 0;  // horizontal position
+let speed = 200;  // pixels per second forward speed
+let steering = 0; // -1 left, 1 right
 
-/* ----- Helpers ----- */
-function rand(a,b){ return a + Math.random()*(b-a); }
+// Input handling
+let keys = {};
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
 
-/* ----- Obstacle spawn ----- */
-function spawnObstacle(){
-  const speedFactor = 1 + gameSpeed * 0.4;
-  const lane = Math.floor(Math.random()*laneCount);
-  const w = rand(64,110);
-  const h = rand(36,56);
-  const laneY = lanes[lane];
-  obstacles.push({
-    x: canvas.width / DPR + w + 20,
-    y: laneY,
-    width: w,
-    height: h,
-    vx: - (120 * speedFactor + Math.random()*60),
-    color: ["#e74c3c","#2d9cdb","#f39c12","#9b59b6"][Math.floor(Math.random()*4)]
-  });
-}
-
-/* ----- Collision detection ----- */
-function rectsOverlap(a,b){
-  return a.x < b.x + b.width &&
-         a.x + a.width > b.x &&
-         a.y < b.y + b.height &&
-         a.y + a.height > b.y;
-}
-
-/* ----- Draw stylized SF background (parallax) ----- */
-let bgOffset = 0;
-function drawBackground(dt){
-  // sky gradient
-  const w = canvas.width / DPR, h = canvas.height / DPR;
-  const g = ctx.createLinearGradient(0,0,0,h);
-  g.addColorStop(0,"#fffbf2");
-  g.addColorStop(1,"#f6e7d6");
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,w,h);
-
-  // abstract distant hills
-  ctx.save();
-  ctx.translate(- (bgOffset*0.12 % w), h*0.52);
-  for(let i=0;i<3;i++){
-    ctx.fillStyle = `rgba(60,70,80,${0.05 + i*0.04})`;
-    ctx.beginPath();
-    const base = 80 + i*30;
-    ctx.moveTo(i*200 - 40, 70);
-    ctx.quadraticCurveTo(i*200 + 60, -30-base, i*200 + 140, 70);
-    ctx.lineTo(i*200 + 170, 200);
-    ctx.lineTo(i*200 - 40, 200);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // skyline / Golden Gate like playful silhouette
-  ctx.save();
-  ctx.translate(- (bgOffset*0.2 % (w*1.2)), h*0.32);
-  ctx.fillStyle = "rgba(20,28,36,0.12)";
-  // simple stylized bridge towers
-  ctx.fillRect(50,20,12,80);
-  ctx.fillRect(120,20,12,80);
-  ctx.fillRect(240,10,12,90);
-  // catenary arcs (very simplified)
-  ctx.beginPath();
-  ctx.moveTo(50,40); ctx.quadraticCurveTo(160,-10,290,40);
-  ctx.lineWidth=4; ctx.strokeStyle="rgba(20,28,36,0.08)"; ctx.stroke();
-  ctx.restore();
-
-  // street strips (foreground)
-  ctx.save();
-  const streetY = canvas.height / DPR * 0.78;
-  ctx.fillStyle = "#f2e6d6";
-  ctx.fillRect(0,streetY - 70, canvas.width / DPR, 140);
-  // road lines
-  ctx.strokeStyle = "rgba(0,0,0,0.06)";
-  for(let i=0;i<10;i++){
-    ctx.beginPath();
-    ctx.moveTo(i*120 - (bgOffset%120), streetY - 5);
-    ctx.lineTo(i*120 + 40 - (bgOffset%120), streetY - 5);
-    ctx.lineWidth = 6; ctx.stroke();
-  }
-  ctx.restore();
-
-  bgOffset += dt * 0.02 * gameSpeed;
-}
-
-/* ----- Draw player (pelican on bike) - stylized shapes ----- */
-function drawPlayer(){
-  const w = canvas.width / DPR, h = canvas.height / DPR;
-  const targetY = lanes[player.lane] * h;
-  // smooth Y
-  player.targetY = targetY;
-  player.y = (player.y || targetY) + (targetY - (player.y || targetY)) * 0.22;
-  // wobble based on keyboard left/right
-  player.wobble *= 0.94;
-
-  // bike wheels
-  const px = player.x;
-  const py = player.y;
-  ctx.save();
-  ctx.translate(px, py);
-  // shadow
-  ctx.fillStyle = "rgba(10,10,10,0.06)";
-  ctx.beginPath(); ctx.ellipse(6, 44, 46, 10, 0,0,Math.PI*2); ctx.fill();
-  // bike frame
-  ctx.strokeStyle = "#2b2b2b";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-12, 8);
-  ctx.lineTo(8, 26);
-  ctx.lineTo(40, 18);
-  ctx.lineTo(22, 6);
-  ctx.stroke();
-
-  // wheels
-  function wheel(x,y,r){
-    ctx.fillStyle = "#1d2a2b";
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.beginPath(); ctx.arc(x,y,r-6,0,Math.PI*2); ctx.fill();
-  }
-  wheel(-18,40,22);
-  wheel(38,40,22);
-
-  // pelican body (cartoon)
-  ctx.translate(-10, -16);
-  // body
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#2b2b2b";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(46,20,24,28, -0.2,0,Math.PI*2);
-  ctx.fill(); ctx.stroke();
-  // wing
-  ctx.beginPath(); ctx.moveTo(38,32); ctx.quadraticCurveTo(10,24,20,10); ctx.fill(); ctx.stroke();
-  // head and beak
-  ctx.beginPath(); ctx.arc(84,4,12,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#f2a24a";
-  ctx.beginPath(); ctx.moveTo(95,8); ctx.quadraticCurveTo(120,4,92,-6); ctx.lineTo(94,12); ctx.fill(); ctx.stroke();
-
-  // eye
-  ctx.fillStyle="#222"; ctx.beginPath(); ctx.arc(82,2,3,0,Math.PI*2); ctx.fill();
-  ctx.restore();
-}
-
-/* ----- Draw obstacles (cars) ----- */
-function drawObstacles(dt){
-  const h = canvas.height / DPR;
-  obstacles.forEach(o=>{
-    const x = o.x; const laneY = o.y * h;
-    // car body
-    ctx.save();
-    ctx.translate(x, laneY);
-    ctx.fillStyle = o.color;
-    ctx.strokeStyle = "rgba(10,10,10,0.12)";
-    roundRect(ctx, -o.width/2, -o.height/2, o.width, o.height, 8, true, true);
-    // windows
-    ctx.fillStyle = "rgba(255,255,255,0.2)"; roundRect(ctx, -o.width/4, -o.height/4, o.width/2, o.height/3,4,true,false);
-    // wheels (simple)
-    ctx.fillStyle="#111";
-    ctx.beginPath(); ctx.ellipse(-o.width/3, o.height/2 - 6, 8,6,0,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(o.width/3, o.height/2 - 6, 8,6,0,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-  });
-}
-
-function roundRect(ctx, x, y, w, h, r, fill, stroke) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  if(fill) ctx.fill();
-  if(stroke) ctx.stroke();
-}
-
-/* ----- Game loop ----- */
-let last = performance.now();
-function gameLoop(now){
-  const dt = (now - last) / 1000;
-  last = now;
-
-  // background
-  drawBackground(dt);
-
-  if(state === 'playing'){
-    // inputs
-    if(keys["ArrowUp"] || keys["w"]) { if(!keys._upConsumed){ moveUp(); keys._upConsumed=true; } } else keys._upConsumed=false;
-    if(keys["ArrowDown"] || keys["s"]) { if(!keys._downConsumed){ moveDown(); keys._downConsumed=true;} } else keys._downConsumed=false;
-    if(keys["ArrowLeft"]) { player.x = Math.max(40, player.x - 220*dt); player.wobble = Math.min(8, player.wobble+1); }
-    if(keys["ArrowRight"]) { player.x = Math.min(canvas.width/ DPR - 80, player.x + 220*dt); player.wobble = Math.min(8, player.wobble+1); }
-
-    // spawn
-    spawnTimer -= dt*1000;
-    if(spawnTimer <= 0){
-      spawnObstacle();
-      spawnTimer = spawnInterval * (0.6 + Math.random()*0.9);
-    }
-
-    // update obstacles
-    for(let i=obstacles.length-1;i>=0;i--){
-      const o = obstacles[i];
-      o.x += o.vx * dt;
-      // remove off-screen
-      if(o.x + o.width < -40) obstacles.splice(i,1);
-      // collision check
-      const playerRect = {
-        x: player.x - player.width/2,
-        y: player.y - player.height/2,
-        width: player.width,
-        height: player.height
-      };
-      const obstacleRect = {
-        x: o.x - o.width/2,
-        y: (o.y * (canvas.height / DPR)) - o.height/2,
-        width: o.width,
-        height: o.height
-      };
-      if(rectsOverlap(playerRect, obstacleRect)){
-        // crash
-        playCrash();
-        state = 'gameover';
-        document.getElementById('overlay').style.display = 'flex';
-        document.querySelector('#overlay .title').innerText = 'You Crashed!';
-        document.querySelector('#overlay .muted').innerText = 'Oof — watch that traffic.';
-        document.getElementById('startBtn').innerText = 'Play Again';
-        if(score > best){ best = score; localStorage.setItem('ppd_best', best); document.getElementById('bestScore').innerText = 'Best: ' + best; }
-      }
-    }
-
-    // accelerate with time
-    gameSpeed += dt * 0.04;
-    spawnInterval = 900 - Math.min(600, gameSpeed * 40);
-
-    // scoring
-    score += Math.floor(40 * gameSpeed * dt);
-    scorePanel.innerText = 'Score: ' + score;
-    speedPanel.innerText = 'Speed: ' + gameSpeed.toFixed(2);
-  }
-
-  // draw obstacles & player
-  drawObstacles(dt);
-  // compute player Y absolute
-  player.y = player.targetY || (canvas.height / DPR * lanes[player.lane]);
-  drawPlayer();
-
-  // UI overlay handling
-  if(state === 'menu'){
-    document.getElementById('overlay').style.display = 'flex';
-  } else if(state === 'playing'){
-    document.getElementById('overlay').style.display = 'none';
-  }
-
-  requestAnimationFrame(gameLoop);
-}
-
-/* ----- Start / Reset ----- */
-function startGame(){
-  state = 'playing';
-  score = 0;
-  gameSpeed = 1;
-  obstacles = [];
-  spawnTimer = 300;
-  player.x = 120;
-  player.lane = 1;
-  player.y = lanes[player.lane] * (canvas.height / DPR);
-  document.getElementById('overlay').style.display = 'none';
-  document.getElementById('startBtn').blur();
-  last = performance.now();
-  playTap();
-}
-document.getElementById('startBtn').addEventListener('click', ()=>{
-  startGame();
+// Touch drag steering
+let touchStartX = null;
+canvas.addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
 });
+canvas.addEventListener('touchmove', e => {
+  let dx = e.touches[0].clientX - touchStartX;
+  playerX = Math.max(-W/3, Math.min(W/3, playerX + dx * 0.02));
+  touchStartX = e.touches[0].clientX;
+});
+canvas.addEventListener('touchend', ()=>{ touchStartX = null; });
 
-/* make Start with keyboard space or tap */
-window.addEventListener('keydown', (e)=>{ if(e.key === ' ' && state !== 'playing'){ startGame(); } });
-
-/* Initialize and run */
-scorePanel.innerText = 'Score: 0';
-speedPanel.innerText = 'Speed: 1';
-requestAnimationFrame(gameLoop);
-
-/* Responsive touch hints: hide virtual controls on wide screens */
-function updateControlsVisibility(){
-  if(window.innerWidth > 900) {
-    document.querySelector('.controls').style.display = 'none';
-  } else { document.querySelector('.controls').style.display = 'flex'; }
-}
-window.addEventListener('resize', updateControlsVisibility);
-updateControlsVisibility();
-
-/* Accessibility: simple tilt support for mobile (optional) */
+// Tilt steering
 if(window.DeviceOrientationEvent){
-  window.addEventListener('deviceorientation', function(e){
-    if(e.gamma != null && Math.abs(e.gamma) > 10 && state === 'playing'){
-      // gamma tilt - positive means tilt right
-      player.x += e.gamma * 0.3;
-      player.x = Math.max(40, Math.min(canvas.width / DPR - 80, player.x));
+  window.addEventListener('deviceorientation', e => {
+    if(e.gamma !== null){
+      playerX = Math.max(-W/3, Math.min(W/3, e.gamma * 5));
     }
   });
 }
+
+// Road segments
+let segments = [];
+let segmentLength = 40; // pixels
+let roadLength = 2000;
+for(let i=0;i<roadLength;i++){
+  segments.push({curve: Math.sin(i/30)*0.5, y: i*segmentLength});
+}
+
+// Obstacles & landmarks
+let obstacles = [];
+let landmarks = [
+  { name:"Coit Tower", dist:500, color:"#ccc" },
+  { name:"Lombard St", dist:1000, color:"#a52a2a" },
+  { name:"Cable Car", dist:1500, color:"#d2691e" }
+];
+
+function addObstacle(z){
+  obstacles.push({x:(Math.random()-0.5)*W*0.4, z, size:40, color:"#ff0000"});
+}
+for(let i=200; i<roadLength*segmentLength; i+=300){
+  addObstacle(i);
+}
+
+// Game loop
+let position = 0;
+let lastTime = performance.now();
+
+function frame(now){
+  let dt = (now - lastTime)/1000;
+  lastTime = now;
+  
+  // Controls
+  if(keys['ArrowLeft']) playerX -= 200*dt;
+  if(keys['ArrowRight']) playerX += 200*dt;
+  playerX = Math.max(-W/3, Math.min(W/3, playerX));
+  
+  position += speed * dt;
+  if(position > roadLength*segmentLength) position -= roadLength*segmentLength;
+  
+  drawScene();
+  requestAnimationFrame(frame);
+}
+
+function drawScene(){
+  ctx.clearRect(0,0,W,H);
+  
+  // Sky
+  ctx.fillStyle = "#87CEEB";
+  ctx.fillRect(0,0,W,H*0.5);
+  
+  // Road
+  let baseSegment = Math.floor(position/segmentLength);
+  let camY = 1000;
+  let camZ = position % segmentLength;
+  let maxY = H;
+  let x = 0;
+  let dx = 0;
+  
+  for(let n=0; n<300; n++){
+    let seg = segments[(baseSegment+n)%roadLength];
+    let p1 = project(playerX - x, camY, n*segmentLength - camZ);
+    let p2 = project(playerX - x - dx, camY, (n+1)*segmentLength - camZ);
+    x += dx;
+    dx += seg.curve;
+    
+    // draw segment
+    ctx.fillStyle = (n%2===0) ? "#555" : "#777";
+    ctx.beginPath();
+    ctx.moveTo(p1.x-p1.w, p1.y);
+    ctx.lineTo(p1.x+p1.w, p1.y);
+    ctx.lineTo(p2.x+p2.w, p2.y);
+    ctx.lineTo(p2.x-p2.w, p2.y);
+    ctx.fill();
+    
+    // Side scenery (landmarks)
+    landmarks.forEach(l=>{
+      if(l.dist > position+n*segmentLength-50 && l.dist < position+n*segmentLength+50){
+        ctx.fillStyle = l.color;
+        ctx.fillRect(p2.x+200, p2.y-50, 50,50);
+      }
+    });
+    
+    if(p2.y >= maxY) break;
+    maxY = p2.y;
+  }
+  
+  // Obstacles
+  obstacles.forEach(o=>{
+    let relZ = o.z - position;
+    if(relZ < 0) relZ += roadLength*segmentLength;
+    if(relZ > 0 && relZ < 3000){
+      let p = project(playerX+o.x, camY, relZ);
+      let size = (W*0.05)/(relZ*0.002);
+      ctx.fillStyle = o.color;
+      ctx.fillRect(p.x-size/2, p.y-size, size, size);
+    }
+  });
+  
+  // Pelican handlebars
+  ctx.fillStyle = "#333";
+  ctx.fillRect(W/2-60, H-40, 120, 10); // bar
+  ctx.fillRect(W/2-50, H-80, 20, 40); // left grip
+  ctx.fillRect(W/2+30, H-80, 20, 40); // right grip
+}
+
+function project(x, y, z){
+  let scale = 500 / z;
+  return {
+    x: W/2 + scale*x,
+    y: H/2 - scale*y,
+    w: scale * 200
+  };
+}
+
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
